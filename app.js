@@ -677,17 +677,25 @@ async function startPlayback() {
     }
 
     setStatus('status3', 'Sending queue to Spotify…');
-    // Disable shuffle and repeat-track so Spotify plays exactly what's shown
-    await Promise.all([
-      fetch('https://api.spotify.com/v1/me/player/shuffle?state=false&device_id=' + device.id, {
+    // Disable shuffle and repeat-track so Spotify plays exactly what's shown.
+    // Must happen before play (shuffle scrambles the uris), but sent one at a time and
+    // confirmed first: mobile clients pause if these race the play command.
+    for (const endpoint of ['shuffle?state=false', 'repeat?state=off']) {
+      await fetch('https://api.spotify.com/v1/me/player/' + endpoint + '&device_id=' + device.id, {
         method: 'PUT',
         headers: { Authorization: 'Bearer ' + accessToken },
-      }).catch(() => {}),
-      fetch('https://api.spotify.com/v1/me/player/repeat?state=off&device_id=' + device.id, {
-        method: 'PUT',
+      }).catch(() => {});
+    }
+    for (let i = 0; i < 10; i++) {
+      const stateRes = await fetch('https://api.spotify.com/v1/me/player', {
         headers: { Authorization: 'Bearer ' + accessToken },
-      }).catch(() => {}),
-    ]);
+      }).catch(() => null);
+      // 204 = no playback state to check; anything unreadable, just proceed
+      if (!stateRes || stateRes.status !== 200) break;
+      const state = await stateRes.json().catch(() => null);
+      if (!state || state.shuffle_state === false) break;
+      await new Promise(r => setTimeout(r, 300));
+    }
 
     const MAX_URIS = 500;
     const uris = queueTracks.slice(0, MAX_URIS).map(t => t.uri);
