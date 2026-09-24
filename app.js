@@ -678,8 +678,8 @@ async function startPlayback() {
 
     setStatus('status3', 'Sending queue to Spotify…');
     // Disable shuffle and repeat-track so Spotify plays exactly what's shown.
-    // Must happen before play (shuffle scrambles the uris), but sent one at a time and
-    // confirmed first: mobile clients pause if these race the play command.
+    // Must happen before play (shuffle scrambles the uris). Sent one at a time and confirmed
+    // before play, in case mobile clients choke when these race the play command.
     for (const endpoint of ['shuffle?state=false', 'repeat?state=off']) {
       await fetch('https://api.spotify.com/v1/me/player/' + endpoint + '&device_id=' + device.id, {
         method: 'PUT',
@@ -711,17 +711,24 @@ async function startPlayback() {
       throw new Error(errMsg);
     }
 
-    // Verify the device actually started playing our queue
-    await new Promise(r => setTimeout(r, 2000));
-    const checkRes = await fetch('https://api.spotify.com/v1/me/player', {
-      headers: { Authorization: 'Bearer ' + accessToken },
-    }).catch(() => null);
-    const check = checkRes?.status === 200 ? await checkRes.json().catch(() => null) : null;
-    if (!check || !check.is_playing || check.item?.uri !== uris[0]) {
+    // Verify the device actually started playing our queue. Poll for a few seconds since
+    // devices can be slow to start; market=from_token exposes linked_from when Spotify
+    // swaps in a regional version of the first track.
+    const isOurTrack = item => item && (item.uri === uris[0] || item.linked_from?.uri === uris[0]);
+    let checkRes = null, check = null;
+    for (let i = 0; i < 12; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      checkRes = await fetch('https://api.spotify.com/v1/me/player?market=from_token', {
+        headers: { Authorization: 'Bearer ' + accessToken },
+      }).catch(() => null);
+      check = checkRes?.status === 200 ? await checkRes.json().catch(() => null) : null;
+      if (check?.is_playing && isOurTrack(check.item)) break;
+    }
+    if (!check || !check.is_playing || !isOurTrack(check.item)) {
       const detail = !check
         ? 'no playback state (' + (checkRes ? checkRes.status : 'network error') + ')'
         : `playing=${check.is_playing}, device="${check.device?.name}" (${check.device?.type}), ` +
-          `track=${check.item?.uri === uris[0] ? 'ours' : (check.item?.name || 'none')}, sent to "${device.name}" (${device.type})`;
+          `track=${isOurTrack(check.item) ? 'ours' : (check.item?.name || 'none')}, sent to "${device.name}" (${device.type})`;
       setStatus('status3', `⚠ Spotify accepted the queue but isn't playing it: ${detail}`, 'err');
       return;
     }
@@ -871,11 +878,13 @@ function initButtonBubbles(btn) {
   }
   resize();
   window.addEventListener('resize', resize);
-  // Touch screens: no push interaction, and fewer circles since the screen is smaller
+  // Touch screens: no push interaction, and fewer circles since the screen is smaller.
+  // pointermove + pointerType filter, because phones fire a synthetic mousemove on every tap.
   const isMobile = window.matchMedia('(pointer: coarse)').matches;
-  if (!isMobile) {
-    document.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
-  }
+  document.addEventListener('pointermove', e => {
+    if (e.pointerType !== 'mouse') return;
+    mouseX = e.clientX; mouseY = e.clientY;
+  });
 
   const COLORS = [
     'rgba(29, 185, 84,  0.45)', // main green
