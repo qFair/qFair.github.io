@@ -697,7 +697,7 @@ async function startPlayback() {
       await new Promise(r => setTimeout(r, 300));
     }
 
-    const MAX_URIS = 500;
+    const MAX_URIS = 50; // TEST: was 500, checking if phones choke on large queues
     const uris = queueTracks.slice(0, MAX_URIS).map(t => t.uri);
     const res = await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + device.id, {
       method: 'PUT',
@@ -733,7 +733,7 @@ async function startPlayback() {
       return;
     }
 
-    setStatus('status3', `✓ ${queueTracks.length} tracks sent to "${device.name}"`, 'ok');
+    setStatus('status3', `✓ ${uris.length} tracks sent to "${device.name}"`, 'ok');
     triggerCircleFlash('rgba(50, 220, 100, 0.90)', -2, 1000);
   } catch (e) {
     setStatus('status3', '✗ ' + e.message, 'err');
