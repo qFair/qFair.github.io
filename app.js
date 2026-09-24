@@ -697,44 +697,89 @@ async function startPlayback() {
       await new Promise(r => setTimeout(r, 300));
     }
 
-    const MAX_URIS = 50; // TEST: was 500, checking if phones choke on large queues
+    const MAX_URIS = 500;
     const uris = queueTracks.slice(0, MAX_URIS).map(t => t.uri);
-    const res = await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + device.id, {
-      method: 'PUT',
-      headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uris }),
-    });
-    if (!res.ok) {
-      let errMsg = res.status + ' ' + res.statusText;
-      try { const e = await res.json(); errMsg = e?.error?.message || errMsg; } catch (_) {}
-      if (res.status === 403) errMsg += ' - your Spotify account may not have playback permission';
-      throw new Error(errMsg);
-    }
+    const auth = { Authorization: 'Bearer ' + accessToken };
+    const wait = ms => new Promise(r => setTimeout(r, ms));
 
-    // Verify the device actually started playing our queue. Poll for a few seconds since
+    const playUris = async list => {
+      const res = await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + device.id, {
+        method: 'PUT',
+        headers: { ...auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uris: list }),
+      });
+      if (!res.ok) {
+        let errMsg = res.status + ' ' + res.statusText;
+        try { const e = await res.json(); errMsg = e?.error?.message || errMsg; } catch (_) {}
+        if (res.status === 403) errMsg += ' - your Spotify account may not have playback permission';
+        throw new Error(errMsg);
+      }
+    };
+
+    // Verify the device actually started playing our first track. Poll for a few seconds since
     // devices can be slow to start; market=from_token exposes linked_from when Spotify
-    // swaps in a regional version of the first track.
+    // swaps in a regional version of the track.
     const isOurTrack = item => item && (item.uri === uris[0] || item.linked_from?.uri === uris[0]);
-    let checkRes = null, check = null;
-    for (let i = 0; i < 12; i++) {
-      await new Promise(r => setTimeout(r, 500));
-      checkRes = await fetch('https://api.spotify.com/v1/me/player?market=from_token', {
-        headers: { Authorization: 'Bearer ' + accessToken },
-      }).catch(() => null);
-      check = checkRes?.status === 200 ? await checkRes.json().catch(() => null) : null;
-      if (check?.is_playing && isOurTrack(check.item)) break;
-    }
-    if (!check || !check.is_playing || !isOurTrack(check.item)) {
-      const detail = !check
+    const verify = async () => {
+      let checkRes = null, check = null;
+      for (let i = 0; i < 12; i++) {
+        await wait(500);
+        checkRes = await fetch('https://api.spotify.com/v1/me/player?market=from_token', { headers: auth }).catch(() => null);
+        check = checkRes?.status === 200 ? await checkRes.json().catch(() => null) : null;
+        if (check?.is_playing && isOurTrack(check.item)) return null;
+      }
+      return !check
         ? 'no playback state (' + (checkRes ? checkRes.status : 'network error') + ')'
-        : `playing=${check.is_playing}, device="${check.device?.name}" (${check.device?.type}), ` +
-          `track=${isOurTrack(check.item) ? 'ours' : (check.item?.name || 'none')}, sent to "${device.name}" (${device.type})`;
-      setStatus('status3', `⚠ Spotify accepted the queue but isn't playing it: ${detail}`, 'err');
+        : `playing=${check.is_playing}, device="${check.device?.name}", ` +
+          `track=${isOurTrack(check.item) ? 'ours' : (check.item?.name || 'none')}`;
+    };
+
+    // The iPhone Spotify app has been dropping a plain play-with-uris command (stops, no track).
+    // Try progressively different approaches and report which one worked.
+    const attempts = [
+      ['direct', async () => { await playUris(uris); return uris.length; }],
+      ['transfer first', async () => {
+        await fetch('https://api.spotify.com/v1/me/player', {
+          method: 'PUT',
+          headers: { ...auth, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_ids: [device.id], play: true }),
+        }).catch(() => {});
+        await wait(1500);
+        await playUris(uris);
+        return uris.length;
+      }],
+      ['one track + queue', async () => {
+        await playUris([uris[0]]);
+        return 1; // rest is queued after verification
+      }],
+    ];
+
+    const failures = [];
+    for (const [name, run] of attempts) {
+      setStatus('status3', failures.length ? `Retrying (${name})…` : 'Sending queue to Spotify…');
+      const sent = await run();
+      const problem = await verify();
+      if (problem) { failures.push(`${name}: ${problem}`); continue; }
+
+      let total = sent;
+      if (name === 'one track + queue') {
+        // Add the rest one by one via the queue endpoint; capped to keep request count sane
+        const MAX_QUEUED = 50;
+        for (const uri of uris.slice(1, 1 + MAX_QUEUED)) {
+          setStatus('status3', `Queueing tracks… ${total}/${Math.min(uris.length, 1 + MAX_QUEUED)}`);
+          const qRes = await fetch('https://api.spotify.com/v1/me/player/queue?uri=' + encodeURIComponent(uri) +
+            '&device_id=' + device.id, { method: 'POST', headers: auth }).catch(() => null);
+          if (!qRes?.ok) break;
+          total++;
+        }
+      }
+      setStatus('status3', `✓ ${total} tracks sent to "${device.name}"` +
+        (failures.length ? ` (worked via: ${name})` : ''), 'ok');
+      triggerCircleFlash('rgba(50, 220, 100, 0.90)', -2, 1000);
       return;
     }
-
-    setStatus('status3', `✓ ${uris.length} tracks sent to "${device.name}"`, 'ok');
-    triggerCircleFlash('rgba(50, 220, 100, 0.90)', -2, 1000);
+    setStatus('status3', `⚠ Spotify accepted the queue but isn't playing it on "${device.name}" (${device.type}). ` +
+      failures.join(' | '), 'err');
   } catch (e) {
     setStatus('status3', '✗ ' + e.message, 'err');
   } finally {
