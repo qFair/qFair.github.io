@@ -1,6 +1,6 @@
 # qFair
 
-Shuffle only the songs from people who are actually present — built for Spotify group playlists.
+Shuffle only the songs from people who are actually present - built for Spotify group playlists.
 
 ## Files
 
