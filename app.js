@@ -22,7 +22,7 @@ let manualMode = false;
 let manualMembers = {};
 let manualIdCounter = 0;
 let loadingPlaylist = false;
-let equalMode = 'songs'; // 'songs' | 'time'
+let equalMode = 'time'; // 'songs' | 'time'
 
 // ---- Helpers ----
 function $(id) { return document.getElementById(id); }
@@ -711,6 +711,21 @@ async function startPlayback() {
       throw new Error(errMsg);
     }
 
+    // Verify the device actually started playing our queue
+    await new Promise(r => setTimeout(r, 2000));
+    const checkRes = await fetch('https://api.spotify.com/v1/me/player', {
+      headers: { Authorization: 'Bearer ' + accessToken },
+    }).catch(() => null);
+    const check = checkRes?.status === 200 ? await checkRes.json().catch(() => null) : null;
+    if (!check || !check.is_playing || check.item?.uri !== uris[0]) {
+      const detail = !check
+        ? 'no playback state (' + (checkRes ? checkRes.status : 'network error') + ')'
+        : `playing=${check.is_playing}, device="${check.device?.name}" (${check.device?.type}), ` +
+          `track=${check.item?.uri === uris[0] ? 'ours' : (check.item?.name || 'none')}, sent to "${device.name}" (${device.type})`;
+      setStatus('status3', `⚠ Spotify accepted the queue but isn't playing it: ${detail}`, 'err');
+      return;
+    }
+
     setStatus('status3', `✓ ${queueTracks.length} tracks sent to "${device.name}"`, 'ok');
     triggerCircleFlash('rgba(50, 220, 100, 0.90)', -2, 1000);
   } catch (e) {
@@ -856,10 +871,11 @@ function initButtonBubbles(btn) {
   }
   resize();
   window.addEventListener('resize', resize);
-  document.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
-  document.addEventListener('touchmove', e => {
-    mouseX = e.touches[0].clientX; mouseY = e.touches[0].clientY;
-  }, { passive: true });
+  // Touch screens: no push interaction, and fewer circles since the screen is smaller
+  const isMobile = window.matchMedia('(pointer: coarse)').matches;
+  if (!isMobile) {
+    document.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
+  }
 
   const COLORS = [
     'rgba(29, 185, 84,  0.45)', // main green
@@ -886,7 +902,7 @@ function initButtonBubbles(btn) {
     };
   }
 
-  const circles = Array.from({ length: 20 }, () => spawn(true));
+  const circles = Array.from({ length: isMobile ? 8 : 20 }, () => spawn(true));
   const REPEL_R = 130, REPEL_R2 = REPEL_R * REPEL_R, REPEL_STR = 1.8;
 
   function resetCircle(c) {
