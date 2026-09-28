@@ -56,6 +56,7 @@ function goBack(step) {
 
 function backFromQueue() {
   setStatus('status3', '');
+  $('open-spotify-btn').style.display = 'none';
   showStep('step-members');
 }
 
@@ -663,17 +664,61 @@ function triggerBurst(sourceEl, color) {
 }
 
 // ---- Playback ----
+// Prefer the active device, otherwise any non-restricted one (e.g. an open but idle Spotify app)
+async function findDevice() {
+  const devData = await spotifyGet('https://api.spotify.com/v1/me/player/devices');
+  const devices = (devData.devices || []).filter(d => !d.is_restricted);
+  return devices.find(d => d.is_active) || devices.find(d => d.type === 'Computer') || devices[0] || null;
+}
+
+// Launch the Spotify app (needs a user click), then poll until it registers as a device
+let waitingForDevice = false;
+async function openSpotifyAndWait() {
+  if (waitingForDevice) return;
+  waitingForDevice = true;
+  const btn = $('open-spotify-btn');
+  btn.disabled = true;
+  window.location.href = 'spotify:';
+  try {
+    for (let i = 0; i < 15; i++) {
+      setStatus('status3', 'Waiting for Spotify to open…');
+      await new Promise(r => setTimeout(r, 2000));
+      const device = await findDevice().catch(() => null);
+      if (device) {
+        btn.style.display = 'none';
+        return startPlayback();
+      }
+    }
+    setStatus('status3', '✗ Still no Spotify device. Make sure Spotify is open and logged in to this account, then press Play again.', 'err');
+  } finally {
+    waitingForDevice = false;
+    btn.disabled = false;
+  }
+}
+
 async function startPlayback() {
   if (!queueTracks.length) return;
+  $('open-spotify-btn').style.display = 'none';
   const playBtn = $('play-btn');
   if (playBtn) { playBtn.disabled = true; $('play-btn-text').textContent = 'Starting…'; }
   setStatus('status3', 'Finding active device…');
   try {
-    const devData = await spotifyGet('https://api.spotify.com/v1/me/player/devices');
-    const device = devData.devices?.find(d => d.is_active) || devData.devices?.[0];
+    const device = await findDevice();
     if (!device) {
-      setStatus('status3', '✗ No active device found. Open Spotify and play something first, then try again.', 'err');
+      setStatus('status3', '✗ No Spotify device found. Open the Spotify app on any device (it doesn\'t need to be playing).', 'err');
+      $('open-spotify-btn').style.display = '';
       return;
+    }
+
+    // Idle devices reject playback commands until playback is transferred to them
+    if (!device.is_active) {
+      setStatus('status3', `Waking up "${device.name}"…`);
+      await fetch('https://api.spotify.com/v1/me/player', {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_ids: [device.id], play: false }),
+      }).catch(() => {});
+      await new Promise(r => setTimeout(r, 800));
     }
 
     setStatus('status3', 'Sending queue to Spotify…');
@@ -691,11 +736,17 @@ async function startPlayback() {
 
     const MAX_URIS = 500;
     const uris = queueTracks.slice(0, MAX_URIS).map(t => t.uri);
-    const res = await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + device.id, {
+    const sendPlay = () => fetch('https://api.spotify.com/v1/me/player/play?device_id=' + device.id, {
       method: 'PUT',
       headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({ uris }),
     });
+    let res = await sendPlay();
+    // Device can take a moment to wake after transfer; retry once
+    if (res.status === 404) {
+      await new Promise(r => setTimeout(r, 1500));
+      res = await sendPlay();
+    }
     if (!res.ok) {
       let errMsg = res.status + ' ' + res.statusText;
       try { const e = await res.json(); errMsg = e?.error?.message || errMsg; } catch (_) {}
