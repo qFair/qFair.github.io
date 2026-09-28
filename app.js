@@ -24,8 +24,6 @@ let manualIdCounter = 0;
 let loadingPlaylist = false;
 let equalMode = 'time'; // 'songs' | 'time'
 
-const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
 // ---- Helpers ----
 function $(id) { return document.getElementById(id); }
 
@@ -48,56 +46,7 @@ function setStatus(id, msg, cls) {
 function showStep(id) {
   document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
   $(id).classList.add('active');
-  const loggedIn = id !== 'step-setup';
-  $('topbar').hidden = !loggedIn;
-  $('stepper').hidden = !loggedIn;
-  const items = [...document.querySelectorAll('#stepper li')];
-  const idx = items.findIndex(li => li.dataset.step === id);
-  items.forEach((li, i) => {
-    li.classList.toggle('done', i < idx);
-    li.classList.toggle('current', i === idx);
-  });
   window.scrollTo(0, 0);
-}
-
-// Let non-button elements (cards, chips) be activated by keyboard like real buttons
-function makeClickable(el, fn) {
-  el.tabIndex = 0;
-  el.setAttribute('role', 'button');
-  el.addEventListener('click', fn);
-  el.addEventListener('keydown', e => {
-    if (e.target !== el) return;
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); }
-  });
-}
-
-function formatDuration(ms) {
-  const mins = Math.round(ms / 60000);
-  const h = Math.floor(mins / 60), m = mins % 60;
-  return h ? `${h}h ${m}m` : `${m}m`;
-}
-
-function logout() {
-  accessToken = null;
-  localStorage.removeItem('gqf_refresh_token');
-  localStorage.removeItem('gqf_expires_at');
-  setStatus('status', '');
-  showStep('step-setup');
-}
-
-function filterPlaylists(q) {
-  q = q.trim().toLowerCase();
-  document.querySelectorAll('#playlist-grid .playlist-card').forEach(card => {
-    card.hidden = q && !card.dataset.name.includes(q);
-  });
-}
-
-function updateSelectedSummary() {
-  const el = $('selected-summary');
-  if (!el) return;
-  if (activeMembers.size === 0) { el.textContent = ''; return; }
-  const songs = manualMode ? allTracks.length : allTracks.filter(t => activeMembers.has(t.addedBy)).length;
-  el.textContent = `${activeMembers.size} here · ${songs} songs`;
 }
 
 function goBack(step) {
@@ -314,9 +263,6 @@ async function loadPlaylists() {
     }
 
     $('playlist-grid').innerHTML = '';
-    const search = $('playlist-search');
-    search.hidden = playlists.length <= 6;
-    search.value = '';
     playlists.forEach(pl => {
       if (!pl) return;
       const imgUrl = pl.images?.[0]?.url;
@@ -332,8 +278,7 @@ async function loadPlaylists() {
           <div class="playlist-card-name">${esc(pl.name || 'Untitled')}</div>
           <div class="playlist-card-count">${pl.tracks?.total ?? pl.items?.total ?? 0} tracks</div>
         </div>`;
-      card.dataset.name = (pl.name || '').toLowerCase();
-      makeClickable(card, () => selectPlaylist(pl));
+      card.onclick = () => selectPlaylist(pl);
       $('playlist-grid').appendChild(card);
     });
   } catch (e) {
@@ -363,7 +308,6 @@ async function selectPlaylist(pl) {
   showStep('step-members');
   $('members-grid').innerHTML = '<div class="loading">Loading tracks & members…</div>';
   setStatus('status2', '');
-  $('selected-summary').textContent = '';
   activeMembers = new Set();
   allTracks = [];
   memberMap = {};
@@ -498,17 +442,14 @@ function renderMembersGrid() {
     const nameWrap = document.createElement('div');
     nameWrap.className = 'member-name';
     nameWrap.appendChild(nameRow);
-    nameWrap.insertAdjacentHTML('beforeend', `<span class="member-songs">${trackCount} songs</span>`);
+    nameWrap.insertAdjacentHTML('beforeend', `<span style="font-size:0.6rem;color:var(--muted)">${trackCount} songs</span>`);
 
     chip.appendChild(document.createElement('div')).className = 'dot';
     chip.appendChild(nameWrap);
-    chip.setAttribute('aria-pressed', 'false');
-    makeClickable(chip, () => {
+    chip.addEventListener('click', () => {
       if (activeMembers.has(uid)) activeMembers.delete(uid);
       else activeMembers.add(uid);
       chip.classList.toggle('active', activeMembers.has(uid));
-      chip.setAttribute('aria-pressed', activeMembers.has(uid));
-      updateSelectedSummary();
     });
     grid.appendChild(chip);
   });
@@ -550,7 +491,6 @@ function removeManualMember(id) {
   delete memberMap[id];
   activeMembers.delete(id);
   renderManualChips();
-  updateSelectedSummary();
 }
 
 function renderManualChips() {
@@ -564,14 +504,11 @@ function renderManualChips() {
       <div class="dot"></div>
       <div class="member-name">${esc(name)}</div>
       <button class="chip-remove" onclick="event.stopPropagation();removeManualMember('${id}')">✕</button>`;
-    chip.setAttribute('aria-pressed', activeMembers.has(id));
-    makeClickable(chip, () => {
+    chip.onclick = () => {
       if (activeMembers.has(id)) activeMembers.delete(id);
       else activeMembers.add(id);
       chip.classList.toggle('active', activeMembers.has(id));
-      chip.setAttribute('aria-pressed', activeMembers.has(id));
-      updateSelectedSummary();
-    });
+    };
     container.appendChild(chip);
   });
 }
@@ -579,11 +516,7 @@ function renderManualChips() {
 function selectAll(val) {
   const keys = manualMode ? Object.keys(manualMembers) : Object.keys(memberMap);
   keys.forEach(id => val ? activeMembers.add(id) : activeMembers.delete(id));
-  document.querySelectorAll('.member-chip').forEach(c => {
-    c.classList.toggle('active', val);
-    c.setAttribute('aria-pressed', val);
-  });
-  updateSelectedSummary();
+  document.querySelectorAll('.member-chip').forEach(c => c.classList.toggle('active', val));
 }
 
 // ---- Build queue ----
@@ -636,7 +569,6 @@ function buildQueue() {
   }
   $('q-count').textContent = queueTracks.length;
   $('q-members').textContent = activeMembers.size;
-  $('q-duration').textContent = formatDuration(queueTracks.reduce((sum, t) => sum + (t.duration_ms || 210000), 0));
 
   const rerolling = $('step-queue').classList.contains('active');
   const rerollBtn = $('reroll-btn');
@@ -1078,7 +1010,7 @@ function initButtonBubbles(btn) {
       ctx.globalAlpha = 1;
     }
 
-    if (!reduceMotion) requestAnimationFrame(tick);
+    requestAnimationFrame(tick);
   }
 
   // Pause when tab is hidden, resume when it comes back
@@ -1089,7 +1021,7 @@ function initButtonBubbles(btn) {
   tick();
 })();
 
-if (!reduceMotion) document.querySelectorAll('.btn-full').forEach(initButtonBubbles);
+document.querySelectorAll('.btn-full').forEach(initButtonBubbles);
 
 // Cursor-reactive background parallax
 (function () {
