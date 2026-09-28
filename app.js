@@ -670,38 +670,48 @@ async function findDevice() {
   return devices.find(d => d.is_active) || devices.find(d => d.type === 'Computer') || devices[0] || null;
 }
 
-// Launch the Spotify app, then poll until it registers as a device (up to ~30s).
-// Must be called synchronously from a click, or browsers block opening the app.
-async function openSpotifyAndWait() {
-  window.location.href = 'spotify:';
-  setStatus('status3', 'Waiting for Spotify to open…');
-  for (let i = 0; i < 15; i++) {
-    await new Promise(r => setTimeout(r, 2000));
-    const device = await findDevice().catch(() => null);
-    if (device) return device;
-  }
-  return null;
+// Swap the Play button for the Open Spotify button (or back), so only one shows at a time
+function showOpenSpotifyBtn(show) {
+  $('open-spotify-btn').style.display = show ? '' : 'none';
+  $('play-btn').style.display = show ? 'none' : '';
 }
 
-// Set when no device was found, so the next Play press opens the Spotify app instead
-let needsOpenSpotify = false;
-const PLAY_LABEL = 'Play on Spotify Now';
-const OPEN_LABEL = 'Click to Open Spotify';
+// Launch the Spotify app (needs a user click), then poll until it registers as a device
+let waitingForDevice = false;
+async function openSpotifyAndWait() {
+  if (waitingForDevice) return;
+  waitingForDevice = true;
+  const btn = $('open-spotify-btn');
+  btn.disabled = true;
+  window.location.href = 'spotify:';
+  try {
+    for (let i = 0; i < 15; i++) {
+      setStatus('status3', 'Waiting for Spotify to open…');
+      await new Promise(r => setTimeout(r, 2000));
+      const device = await findDevice().catch(() => null);
+      if (device) {
+        showOpenSpotifyBtn(false);
+        return startPlayback();
+      }
+    }
+    setStatus('status3', '✗ Still no Spotify device. Make sure Spotify is open and logged in to this account, then try again.', 'err');
+  } finally {
+    waitingForDevice = false;
+    btn.disabled = false;
+  }
+}
 
 async function startPlayback() {
   if (!queueTracks.length) return;
+  showOpenSpotifyBtn(false);
   const playBtn = $('play-btn');
-  const opening = needsOpenSpotify;
-  needsOpenSpotify = false;
   if (playBtn) { playBtn.disabled = true; $('play-btn-text').textContent = 'Starting…'; }
-  if (!opening) setStatus('status3', 'Finding active device…');
+  setStatus('status3', 'Finding active device…');
   try {
-    const device = opening ? await openSpotifyAndWait() : await findDevice();
+    const device = await findDevice();
     if (!device) {
-      needsOpenSpotify = true;
-      setStatus('status3', opening
-        ? '✗ Still couldn\'t find Spotify. Make sure it\'s logged in to this account, then try again.'
-        : 'Spotify isn\'t open on any device.', 'err');
+      setStatus('status3', 'Spotify isn\'t open on any device.', 'err');
+      showOpenSpotifyBtn(true);
       return;
     }
 
@@ -754,7 +764,7 @@ async function startPlayback() {
   } catch (e) {
     setStatus('status3', '✗ ' + e.message, 'err');
   } finally {
-    if (playBtn) { playBtn.disabled = false; $('play-btn-text').textContent = needsOpenSpotify ? OPEN_LABEL : PLAY_LABEL; }
+    if (playBtn) { playBtn.disabled = false; $('play-btn-text').textContent = 'Play on Spotify Now'; }
     const st = $('status3');
     const rect = st.getBoundingClientRect();
     if (rect.bottom > window.innerHeight) {
