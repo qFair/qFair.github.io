@@ -56,6 +56,7 @@ function goBack(step) {
 
 function backFromQueue() {
   setStatus('status3', '');
+  showOpenSpotifyBtn(false);
   showStep('step-members');
 }
 
