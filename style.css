@@ -14,8 +14,9 @@
 html {
   overflow-x: hidden;
   width: 100%;
+  overscroll-behavior: none; /* no rubber-band bounce on iOS */
 }
-body { overflow-x: hidden; width: 100%; }
+body { overflow-x: hidden; width: 100%; overscroll-behavior: none; }
 
 body {
   border-top: 4px solid var(--green);
@@ -23,6 +24,8 @@ body {
   color: var(--text);
   font-family: 'Space Mono', monospace;
   min-height: 100vh;
+  /* dvh = visible height; plain vh on iOS includes the hidden toolbar and forces a scroll */
+  min-height: 100dvh;
   padding: 2rem 1rem;
   /* subtle halftone texture for the printed comic feel */
   background-image: radial-gradient(circle, rgba(255,255,255,0.032) 1px, transparent 1px);
@@ -690,7 +693,7 @@ input[type="text"]::placeholder { color: var(--muted); }
   .btn { font-size: 0.82rem; padding: 0.7rem 1rem; }
   .btn-full { font-size: 0.9rem; padding: 0.85rem; }
 
-  .playlist-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0.6rem; max-height: calc(100vh - 7rem); }
+  .playlist-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0.6rem; max-height: calc(100vh - 7rem); max-height: calc(100dvh - 7rem); }
 
   /* Cap members grid so step-3 fits without page scroll */
   .members-grid {
