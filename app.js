@@ -687,7 +687,7 @@ async function openSpotifyAndWait() {
   window.location.href = 'spotify:';
   try {
     for (let i = 0; i < 15; i++) {
-      setStatus('status3', 'Waiting for Spotify to open…');
+      setStatus('status3', 'Waiting for Spotify… come back to this tab once it\'s open.');
       await new Promise(r => setTimeout(r, 2000));
       const device = await findDevice().catch(() => null);
       if (device) {
@@ -711,7 +711,7 @@ async function startPlayback() {
   try {
     const device = await findDevice();
     if (!device) {
-      setStatus('status3', 'Spotify isn\'t open on any device.', 'err');
+      setStatus('status3', 'Spotify isn\'t open on any device. Tap "Click to Open Spotify", then come back to this tab.', 'err');
       showOpenSpotifyBtn(true);
       return;
     }
