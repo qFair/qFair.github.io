@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="apple-touch-icon" href="favicon.png">
   <link rel="icon" sizes="192x192" href="favicon.png">
-  <link rel="stylesheet" href="style.css?v=2">
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <div class="wave-bg" aria-hidden="true">
@@ -29,12 +29,29 @@
     <p class="subtitle">// shuffle only the songs from people who are actually there</p>
     <button class="btn btn-full" onclick="doAuth()">Connect to Spotify</button>
     <div id="status" class="status"></div>
+    <ol class="how-it-works">
+      <li><span class="how-num">1</span><div><b>Pick a shared playlist</b>Any collaborative playlist your group adds to.</div></li>
+      <li><span class="how-num">2</span><div><b>Tap who's here</b>Only their songs make the cut.</div></li>
+      <li><span class="how-num">3</span><div><b>Play a fair shuffle</b>Everyone gets an equal share of airtime.</div></li>
+    </ol>
   </div>
+
+  <!-- Top bar + progress (shown after login) -->
+  <div class="topbar" id="topbar" hidden>
+    <span class="wordmark">Queue <span>Fair</span></span>
+    <button class="select-link" onclick="logout()">log out</button>
+  </div>
+  <ol class="stepper" id="stepper" hidden>
+    <li data-step="step-playlists"><span>1</span>Playlist</li>
+    <li data-step="step-members"><span>2</span>Who's here</li>
+    <li data-step="step-queue"><span>3</span>Queue</li>
+  </ol>
 
   <!-- STEP 2: Pick playlist -->
   <div class="step" id="step-playlists">
     <div class="card">
-      <div class="card-label">Your Playlists (tap one to select)</div>
+      <div class="card-label">Pick a playlist</div>
+      <input type="text" id="playlist-search" class="playlist-search" placeholder="Search playlists…" oninput="filterPlaylists(this.value)" hidden>
       <div id="playlist-grid" class="playlist-grid">
         <div class="loading">Loading your playlists…</div>
       </div>
@@ -52,8 +69,9 @@
       </div>
       <div class="select-row">
         <button class="select-link" onclick="selectAll(true)">select all</button>
-        <span style="color:var(--border)">|</span>
+        <span style="color:var(--muted)">|</span>
         <button class="select-link" onclick="selectAll(false)">clear</button>
+        <span class="selected-summary" id="selected-summary"></span>
       </div>
       <div id="status2" class="status"></div>
     </div>
@@ -84,11 +102,15 @@
       <div class="stats-row">
         <div>
           <div class="track-count" id="q-count">0</div>
-          <div class="track-count-label">tracks queued</div>
+          <div class="track-count-label">tracks</div>
         </div>
         <div>
-          <div class="track-count" id="q-members" style="font-size:1.6rem">0</div>
-          <div class="track-count-label">members included</div>
+          <div class="track-count" id="q-members">0</div>
+          <div class="track-count-label">people</div>
+        </div>
+        <div>
+          <div class="track-count" id="q-duration">0m</div>
+          <div class="track-count-label">total time</div>
         </div>
       </div>
       <hr class="divider">
